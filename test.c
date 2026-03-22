@@ -54,7 +54,7 @@ int main() {
 
 
     // max length = 21
-    unsigned char ciphertextStrings[40][22];
+    unsigned char ciphertextStrings[40][128];
     int ciphertextLengths[40];
 
     for(int i=0;i<40;i++){
@@ -74,55 +74,79 @@ int main() {
     int num = -1;
     char* str = calloc(100,1);
 
-    while(true){
-        
-
-        printf("Enter a number: ");
+    while (true) {
+        printf("Enter a number (0-39): ");
         if (scanf("%d", &num) != 1) {
             fprintf(stderr, "Invalid input for number.\n");
             exit(EXIT_FAILURE);
         }
 
-        // 2. Clear the newline character from the buffer
-        // This is crucial because scanf leaves the '\n' behind
+        // Clear the newline character from the buffer
         while (getchar() != '\n');
 
+        // Ensure the index is within bounds
+        if (num < 0 || num >= 40) {
+            printf("Error: Index must be between 0 and 39.\n");
+            continue;
+        }
+
         printf("Enter a plaintext string: ");
-        // 3. Read the string (fgets is safer than scanf for strings)
         if (fgets(str, 100, stdin) == NULL) {
             fprintf(stderr, "Error when reading plaintext");
             exit(EXIT_FAILURE);
         }
-        int stringLength = strlen(str)-1;
+
+        // Remove newline and calculate length
+        int inputLength = strlen(str);
+        if (str[inputLength - 1] == '\n') {
+            str[inputLength - 1] = '\0';
+            inputLength--;
+        }
+
+        // SAFETY CHECK: We can only derive a keystream as long as the 
+        // SHORTEST of our input guess OR the ciphertext at that index.
+        int maxCipherLength = ciphertextLengths[num];
+        int validKeystreamLength = (inputLength < maxCipherLength) ? inputLength : maxCipherLength;
 
         unsigned char* ciphertext = ciphertextStrings[num];
-        unsigned char* plaintext = str;
-        unsigned char* keystream = xorRawStrings(ciphertext,plaintext,stringLength);
+        unsigned char* plaintext = (unsigned char*)str;
 
-        for(int j=0;j<40;j++){
+        // Derive the keystream using the safe length
+        unsigned char* keystream = xorRawStrings(ciphertext, plaintext, validKeystreamLength);
+
+        printf("\n--- Results based on recovered keystream (%d bytes) ---\n", validKeystreamLength);
+
+        for (int j = 0; j < 40; j++) {
             unsigned char* ciphertext_j = ciphertextStrings[j];
             int ciphertext_j_length = ciphertextLengths[j];
-            int minLength = -1;
-            if(ciphertext_j_length < stringLength){
-                minLength = ciphertext_j_length;
-            } else {
-                minLength = stringLength;
+
+            // We can only decrypt up to the amount of keystream we actually have
+            // AND the length of the target ciphertext.
+            int decryptableLength = (ciphertext_j_length < validKeystreamLength) ? ciphertext_j_length : validKeystreamLength;
+
+            unsigned char* plaintext_j = xorRawStrings(ciphertext_j, keystream, decryptableLength);
+
+            printf("%2d: ", j);
+            for (int n = 0; n < decryptableLength; n++) {
+                // Check if character is printable, otherwise print a dot
+                if (plaintext_j[n] >= 32 && plaintext_j[n] <= 126) {
+                    printf("%c", plaintext_j[n]);
+                } else {
+                    printf(".");
+                }
             }
-            unsigned char* plaintext_j = xorRawStrings(ciphertext_j,keystream,minLength);
-            
-            printf("%d ",j);
-            for(int n=0;n<minLength;n++){
-                printf("%c",plaintext_j[n]);
-            }
-            free(plaintext_j);
-            int encryptedLength = ciphertextLengths[j];
-            for(int n=0;n<encryptedLength-minLength;n++){
+
+            // Fill the rest with '?' to show unknown bytes
+            for (int n = 0; n < (ciphertext_j_length - decryptableLength); n++) {
                 printf("?");
             }
             printf("\n");
-            
+
+            free(plaintext_j);
         }
-        printf("-----------------------------------\n");
+
+        free(keystream); // Don't forget to free the keystream each iteration!
+        printf("------------------------------------------------------\n");
     }
     
     return 0;
